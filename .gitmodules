@@ -1,0 +1,3 @@
+[submodule "Dependencies/adb-mobile"]
+	path = Dependencies/adb-mobile
+	url = https://github.com/wsvn53/adb-mobile.git
