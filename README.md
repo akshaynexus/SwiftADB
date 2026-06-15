@@ -16,7 +16,7 @@ Add SwiftADB to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/yourusername/SwiftADB.git", from: "1.0.0")
+    .package(url: "https://github.com/akshaynexus/SwiftADB.git", from: "1.0.0")
 ]
 ```
 
@@ -33,7 +33,7 @@ Before using SwiftADB, build the adb-mobile native library:
 
 ```bash
 # Clone with submodules
-git clone --recursive https://github.com/yourusername/SwiftADB.git
+git clone --recursive https://github.com/akshaynexus/SwiftADB.git
 
 # Or if already cloned
 git submodule update --init --recursive
