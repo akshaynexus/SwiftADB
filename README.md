@@ -40,80 +40,135 @@ Or in Xcode:
 
 ### 1. Generate or Load an RSA KeyPair
 
-ADB authentication requires an RSA key pair. You can generate a new one or initialize it with existing `SecKey` references:
+ADB authentication requires a 2048-bit RSA key pair. You can generate a new key pair on the fly or load existing PEM key files using Apple's Security framework:
 
 ```swift
 import SwiftADB
 
-// Generate a new 2048-bit RSA key pair
+// Generate a new key pair
 let keyPair = try KeyPair.generate()
 ```
 
-### 2. Connect to an ADB Server/Device
+If you have a pre-existing key (e.g. `~/.android/adbkey`), you can instantiate a `KeyPair` by parsing the private key and public key into `SecKey` objects and using the `KeyPair(privateKey:publicKey:)` initializer.
 
-Use the `AdbConnection.Builder` to build and initiate a connection to the target device.
+---
+
+## Connection & Pairing Flow
+
+SwiftADB supports both the traditional **unencrypted TCP connection (Port 5555)** and **modern secure TLS connections (STLS)**.
+
+### Traditional Connection & On-Device Pairing (Port 5555)
+
+When connecting to a device over an unencrypted connection:
+1. **Initial Signature Check:** SwiftADB attempts to sign a challenge token from the device using the host's private key.
+2. **Known Hosts:** If the device has previously accepted this host's public key, it accepts the signature, sends a `CNXN` (connect) packet, and the connection is established.
+3. **On-Device Prompt (Pairing):** If the device does not recognize the signature:
+   - If `throwOnUnauthorised: true` is passed, the connection fails immediately throwing `.authenticationFailed`.
+   - If `throwOnUnauthorised: false` (default), SwiftADB automatically sends the host's public key. This triggers the **"Allow USB debugging?"** confirmation prompt on the Android device's screen. The connection blocks until the user taps **"Allow"**, after which the device sends `CNXN`.
 
 ```swift
-import SwiftADB
-
 let connection = try AdbConnection.Builder()
-    .setHost("192.168.1.100") // IP address of the Android device
-    .setPort(5555)            // Default ADB port
+    .setHost("192.168.1.100")
+    .setPort(5555)
     .setKeyPair(keyPair)
     .setDeviceName("MyMacBook")
     .build()
 
-// Establish connection with a timeout (seconds)
-let success = try await connection.connect(
-    timeout: 15,
-    throwOnUnauthorised: true,
-    useTls: true // Set to true to upgrade connection using TLS (STLS) for modern devices
-)
-
-if success {
-    print("Connected successfully!")
+do {
+    // This will trigger the authorization popup on the device screen if not already paired
+    let connected = try await connection.connect(
+        timeout: 30, // Give the user 30 seconds to tap "Allow" on the device
+        throwOnUnauthorised: false
+    )
+    if connected {
+        print("Successfully authenticated and connected!")
+    }
+} catch ADBError.authenticationFailed {
+    print("Authentication rejected or user did not authorize the connection.")
+} catch {
+    print("Connection error: \(error.localizedDescription)")
 }
 ```
 
-### 3. Open a Stream and Run Shell Commands
+### Secure Connections via TLS (STLS)
 
-Once connected, you can open streams for various services using `LocalServices`.
+Modern Android devices (Android 11+) support secure wireless debugging over TLS.
+
+To configure and establish a TLS connection:
+1. Pass `useTls: true` to the `connect` method.
+2. In STLS mode, the connection will initiate a TLS v1.3 handshake (negotiating a secure tunnel) immediately after receiving the STLS command sequence.
+3. You can attach a certificate (e.g. self-signed or CA-signed) via `KeyPair(privateKey:certificate:)` to handle certificate identity matching.
 
 ```swift
-// Open a shell service stream
-let stream = try await connection.open(service: .shell, args: ["logcat", "-d"])
+let connected = try await connection.connect(
+    timeout: 15,
+    throwOnUnauthorised: true,
+    useTls: true // Upgrades the transport socket to TLS v1.3 (STLS)
+)
+```
 
-// Read data asynchronously from the stream until EOF or closed
+---
+
+## Running Shell Commands
+
+SwiftADB supports two primary shell running modes: **Non-Interactive (Single Command)** and **Interactive Terminal Sessions**.
+
+### Non-Interactive Shell Commands
+
+Use this mode to execute a single shell command and capture its output. The stream is automatically closed by the Android device once execution completes.
+
+```swift
+// Executes a command and exits
+let stream = try await connection.open(service: .shell, args: ["pm", "list", "packages", "-3"])
+
 while !await stream.getIsClosed() {
     do {
         let data = try await stream.read()
-        if data.isEmpty { break } // EOF
+        if data.isEmpty { break } // EOF reached
         
-        if let output = String(data: data, encoding: .utf8) {
-            print(output)
+        if let text = String(data: data, encoding: .utf8) {
+            print(text, terminator: "")
         }
     } catch {
-        print("Stream error: \(error)")
+        print("\nStream error: \(error)")
         break
     }
 }
+print("\nCommand finished.")
 ```
 
-### 4. Interactive Command Writing
+### Interactive Shell Sessions
 
-You can write data to an active stream (e.g., executing commands interactively inside a shell session).
+Open an interactive shell by passing an empty array of arguments. In this mode, the stream remains open. You can write commands directly to standard input (`stdin`) and listen to standard output (`stdout`) continuously.
 
 ```swift
-let interactiveShell = try await connection.open(service: .shell, args: [])
+let shellStream = try await connection.open(service: .shell, args: [])
 
-// Send command text followed by newline
-if let commandData = "pm list packages\n".data(using: .utf8) {
-    try await interactiveShell.write(commandData)
+// Setup an async task to continuously read output from the shell
+Task {
+    while !await shellStream.getIsClosed() {
+        if let data = try? await shellStream.read(), !data.isEmpty,
+           let output = String(data: data, encoding: .utf8) {
+            print(output, terminator: "")
+        }
+    }
 }
 
-// Close the stream when done
-try await interactiveShell.close()
+// Write commands interactively
+func executeCommand(_ command: String) async throws {
+    let cmdData = (command + "\n").data(using: .utf8)!
+    try await shellStream.write(cmdData)
+}
+
+// Send interactive inputs
+try await executeCommand("cd /sdcard")
+try await executeCommand("pwd")
+try await executeCommand("ls -l")
+
+// Terminate/Close the interactive session
+try await shellStream.close()
 ```
+
 
 ---
 
