@@ -1,18 +1,27 @@
 # SwiftADB
 
-A Swift wrapper around [adb-mobile](https://github.com/wsvn53/adb-mobile), providing native ADB (Android Debug Bridge) functionality for iOS apps.
+A 100% native Swift implementation of the ADB (Android Debug Bridge) protocol for iOS, macOS, tvOS, and watchOS.
+
+This library eliminates the need for native C-based wrapper dependencies (like `adb-mobile`), implementing the full ADB protocol, RSA key signing, ASN.1 parsing, and secure connection upgrades (STLS) natively in Swift using Apple's Network and Security frameworks.
+
+## Features
+
+- **Pure Swift:** Zero external C libraries or submodules required.
+- **Swift Concurrency:** Modern async/await APIs using `actor` design to ensure safe concurrent connection and stream management.
+- **Natively Secure:** Integrates standard Apple `Security` APIs for RSA key pair generation/signing and Apple `Network` APIs for secure TLS v1.3 handshakes (STLS).
+- **Stream-based Protocol:** Open interactive streams directly over ADB to run shell commands, forward ports, transfer files, and more.
 
 ## Requirements
 
-- iOS 13.0+ / macOS 10.15+
-- Swift 5.9+
+- iOS 13.0+ / macOS 10.15+ / tvOS 13.0+ / watchOS 6.0+
+- Swift 6.0+
 - Xcode 15.0+
 
 ## Installation
 
 ### Swift Package Manager
 
-Add SwiftADB to your `Package.swift`:
+Add SwiftADB to your `Package.swift` dependencies:
 
 ```swift
 dependencies: [
@@ -21,177 +30,127 @@ dependencies: [
 ```
 
 Or in Xcode:
-1. File → Add Package Dependencies
-2. Enter the repository URL
-3. Select version rule (e.g., "Up to Next Major" from "1.0.0")
+1. Go to **File** → **Add Packages...**
+2. Enter the repository URL: `https://github.com/akshaynexus/SwiftADB.git`
+3. Set Dependency Rule to **Up to Next Major Version** starting from `1.0.0`.
 
-## Setup
+---
 
-### Building the Native Library
+## Getting Started
 
-Before using SwiftADB, build the adb-mobile native library:
+### 1. Generate or Load an RSA KeyPair
 
-```bash
-# Clone with submodules
-git clone --recursive https://github.com/akshaynexus/SwiftADB.git
-
-# Or if already cloned
-git submodule update --init --recursive
-
-# Build the native library
-cd Dependencies/adb-mobile
-make
-```
-
-This generates `libadb.a` in the `Dependencies/adb-mobile/output` directory.
-
-## Usage
-
-### Basic Example
+ADB authentication requires an RSA key pair. You can generate a new one or initialize it with existing `SecKey` references:
 
 ```swift
 import SwiftADB
 
-// Initialize with default settings
-let adb = ADB()
+// Generate a new 2048-bit RSA key pair
+let keyPair = try KeyPair.generate()
+```
 
-// List connected devices
-let devices = try adb.devices()
-for device in devices {
-    print(device)
+### 2. Connect to an ADB Server/Device
+
+Use the `AdbConnection.Builder` to build and initiate a connection to the target device.
+
+```swift
+import SwiftADB
+
+let connection = try AdbConnection.Builder()
+    .setHost("192.168.1.100") // IP address of the Android device
+    .setPort(5555)            // Default ADB port
+    .setKeyPair(keyPair)
+    .setDeviceName("MyMacBook")
+    .build()
+
+// Establish connection with a timeout (seconds)
+let success = try await connection.connect(
+    timeout: 15,
+    throwOnUnauthorised: true,
+    useTls: true // Set to true to upgrade connection using TLS (STLS) for modern devices
+)
+
+if success {
+    print("Connected successfully!")
 }
 ```
 
-### Custom Configuration
+### 3. Open a Stream and Run Shell Commands
+
+Once connected, you can open streams for various services using `LocalServices`.
 
 ```swift
-import SwiftADB
+// Open a shell service stream
+let stream = try await connection.open(service: .shell, args: ["logcat", "-d"])
 
-// Initialize with custom port and home directory
-let adb = ADB(
-    serverPort: "15037",
-    homeDir: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].path
-)
+// Read data asynchronously from the stream until EOF or closed
+while !await stream.getIsClosed() {
+    do {
+        let data = try await stream.read()
+        if data.isEmpty { break } // EOF
+        
+        if let output = String(data: data, encoding: .utf8) {
+            print(output)
+        }
+    } catch {
+        print("Stream error: \(error)")
+        break
+    }
+}
 ```
 
-### Connect to a Device
+### 4. Interactive Command Writing
+
+You can write data to an active stream (e.g., executing commands interactively inside a shell session).
 
 ```swift
-import SwiftADB
+let interactiveShell = try await connection.open(service: .shell, args: [])
 
-let adb = ADB()
+// Send command text followed by newline
+if let commandData = "pm list packages\n".data(using: .utf8) {
+    try await interactiveShell.write(commandData)
+}
 
-// Connect to a device over TCP/IP
-let result = try adb.connect(host: "192.168.1.100", port: 5555)
-print(result)
-
-// List connected devices
-let devices = try adb.devices()
-print(devices)
+// Close the stream when done
+try await interactiveShell.close()
 ```
 
-### Execute Shell Commands
-
-```swift
-import SwiftADB
-
-let adb = ADB()
-
-// Run a shell command
-let output = try adb.shell(command: "ls -la /sdcard/")
-print(output)
-
-// Get device properties
-let model = try adb.shell(command: "getprop ro.product.model")
-print("Device model: \(model)")
-```
-
-### File Transfer
-
-```swift
-import SwiftADB
-
-let adb = ADB()
-
-// Push a file to the device
-try adb.push(localPath: "/path/to/local/file.txt", remotePath: "/sdcard/file.txt")
-
-// Pull a file from the device
-try adb.pull(remotePath: "/sdcard/file.txt", localPath: "/path/to/local/file.txt")
-```
-
-### Install APK
-
-```swift
-import SwiftADB
-
-let adb = ADB()
-
-// Install an APK file
-let result = try adb.install(apkPath: "/path/to/app.apk")
-print(result)
-```
-
-### Disconnect
-
-```swift
-import SwiftADB
-
-let adb = ADB()
-
-// Disconnect from a specific device
-try adb.disconnect(host: "192.168.1.100:5555")
-
-// Disconnect from all devices
-try adb.disconnect()
-```
+---
 
 ## API Reference
 
-### ADB
+### `KeyPair`
+Manages the generation, storage, and signing of authentication tokens.
+- `static func generate() throws -> KeyPair`: Generates a new 2048-bit RSA key pair.
+- `func sign(token: Data) throws -> Data`: Signs the challenge token sent by the ADB daemon.
 
-```swift
-public class ADB {
-    /// Initialize ADB with optional configuration
-    public init(serverPort: String = "5037", homeDir: String? = nil)
+### `AdbConnection`
+Manages the lifetime and socket interactions of an active ADB session.
+- `connect(timeout: TimeInterval, throwOnUnauthorised: Bool, useTls: Bool) async throws -> Bool`: Connects, authenticates, and upgrades (if requested) to TLS.
+- `open(service: LocalServices, args: [String]) async throws -> AdbStream`: Opens a stream of the given service.
+- `close() async`: Closes the connection and cleans up all active streams.
 
-    /// Execute a raw ADB command
-    public func execute(command: String, arguments: [String]) throws -> String
+### `AdbStream`
+Represents an active bi-directional stream with the ADB daemon.
+- `read() async throws -> Data`: Reads the next chunk of incoming data.
+- `write(_ data: Data) async throws`: Writes payload data to the stream.
+- `close() async throws`: Closes this stream.
+- `getIsClosed() -> Bool`: Checks if the stream has been closed.
 
-    /// List connected devices
-    public func devices() throws -> [String]
+### `LocalServices`
+Supported service types including:
+- `.shell` (Interactive / single shell commands)
+- `.tcpConnect` (Port forwarding/tunneling)
+- `.remount`
+- `.file`
+- `.framebuffer`
+- `.backup` / `.restore`
+- `.reverse` (Reverse port forwarding)
+- And local/abstract Unix sockets.
 
-    /// Connect to a device over TCP/IP
-    public func connect(host: String, port: Int) throws -> String
-
-    /// Disconnect from a device or all devices
-    public func disconnect(host: String?) throws -> String
-
-    /// Execute a shell command on the device
-    public func shell(command: String) throws -> String
-
-    /// Install an APK file
-    public func install(apkPath: String) throws -> String
-
-    /// Push a file to the device
-    public func push(localPath: String, remotePath: String) throws -> String
-
-    /// Pull a file from the device
-    public func pull(remotePath: String, localPath: String) throws -> String
-
-    /// Get ADB version
-    public func version() throws -> String
-}
-```
-
-### ADBError
-
-```swift
-public enum ADBError: LocalizedError {
-    case commandFailed(Int32)
-}
-```
+---
 
 ## License
 
-MIT License
+SwiftADB is available under the GPL-3.0-or-later OR Apache-2.0 License. See the LICENSE file for details.
+
