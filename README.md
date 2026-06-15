@@ -169,6 +169,93 @@ try await executeCommand("ls -l")
 try await shellStream.close()
 ```
 
+---
+
+## Complete Integration Example (Pairing, Shell, & APK Installation)
+
+Here is a full integration example demonstrating how to configure a key pair, authenticate/pair with a device, run a diagnostic shell command, and stream-install an APK package.
+
+```swift
+import Foundation
+import SwiftADB
+
+func runADBFlow() async {
+    do {
+        // 1. Generate or load a 2048-bit RSA keypair
+        let keyPair = try KeyPair.generate()
+        
+        // 2. Setup the connection builder
+        let connection = try AdbConnection.Builder()
+            .setHost("192.168.1.100") // Target Android device IP
+            .setPort(5555)            // Default ADB port
+            .setKeyPair(keyPair)
+            .setDeviceName("MyMacBook")
+            .build()
+        
+        print("Connecting to device...")
+        
+        // 3. Connect and handle pairing
+        // If not already paired, this will block and wait for the user to tap "Allow" on the device screen
+        let connected = try await connection.connect(
+            timeout: 60, // Give the user plenty of time to authorize on-screen
+            throwOnUnauthorised: false
+        )
+        
+        guard connected else {
+            print("Failed to establish connection.")
+            return
+        }
+        
+        print("Connected and authenticated!")
+        
+        // 4. Run a shell command to verify the device model
+        print("Fetching device model...")
+        let infoStream = try await connection.open(service: .shell, args: ["getprop ro.product.model"])
+        while !await infoStream.getIsClosed() {
+            if let data = try? await infoStream.read(), !data.isEmpty,
+               let model = String(data: data, encoding: .utf8) {
+                print("Device Model: \(model.trimmingCharacters(in: .whitespacesAndNewlines))")
+            }
+        }
+        
+        // 5. Install an APK file using stream installation
+        let apkURL = URL(fileURLWithPath: "/path/to/my-app.apk")
+        let apkData = try Data(contentsOf: apkURL)
+        let apkSize = apkData.count
+        
+        print("Streaming APK (\(apkSize) bytes) to the package manager...")
+        
+        // Open the package installer command stream
+        // Android's 'cmd package install' service accepts file streaming via stdin
+        let installStream = try await connection.open(
+            destination: "exec:cmd package install -S \(apkSize)"
+        )
+        
+        // Write the APK bytes to the stream
+        try await installStream.write(apkData)
+        
+        // Read the installation result output (e.g. "Success" or "Failure [reason]")
+        var installResult = ""
+        while !await installStream.getIsClosed() {
+            if let responseData = try? await installStream.read(), !responseData.isEmpty,
+               let text = String(data: responseData, encoding: .utf8) {
+                installResult += text
+            }
+        }
+        
+        print("Install Result: \(installResult.trimmingCharacters(in: .whitespacesAndNewlines))")
+        
+        // 6. Clean up and close connection
+        await connection.close()
+        print("Connection closed.")
+        
+    } catch {
+        print("ADB Flow Error: \(error.localizedDescription)")
+    }
+}
+```
+
+
 
 ---
 
