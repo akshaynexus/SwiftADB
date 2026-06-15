@@ -1,5 +1,0 @@
-module CADB [system] {
-    header "adb_public.h"
-    link "adb"
-    export *
-}
