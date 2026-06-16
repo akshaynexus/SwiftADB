@@ -114,7 +114,7 @@ struct GroupElement {
         let G = D - C
         let H = D + C
         let F = B + A
-        return GroupElement(rep: .p1p1, X: E, Y: F, Z: G, T: H)
+        return GroupElement(rep: .p1p1, X: E, Y: F, Z: H, T: G)
     }
 
     /// Subtraction: self is in P3, rhs is in CACHED → result in P1P1.
@@ -129,7 +129,7 @@ struct GroupElement {
         let G = D + C
         let H = D - C
         let F = B + A
-        return GroupElement(rep: .p1p1, X: E, Y: F, Z: G, T: H)
+        return GroupElement(rep: .p1p1, X: E, Y: F, Z: H, T: G)
     }
 
     // MARK: - Mixed addition (P3 + PRECOMP → P1P1)
@@ -145,21 +145,21 @@ struct GroupElement {
         let G = D - C
         let H = D + C
         let F = B + A
-        return GroupElement(rep: .p1p1, X: E, Y: F, Z: G, T: H)
+        return GroupElement(rep: .p1p1, X: E, Y: F, Z: H, T: G)
     }
 
     // MARK: - Doubling (P2 → P1P1)
 
     func dbl() -> GroupElement {
         let p2 = toP2()
-        let A = p2.X.square()
-        let B = p2.Y.square()
-        let C = p2.Z.square() + p2.Z.square()
-        let H = A + B
-        let E = H - (p2.X + p2.Y).square()
-        let G = A - B
-        let F = C + G
-        return GroupElement(rep: .p1p1, X: E, Y: H, Z: F, T: G)
+        let XX = p2.X.square()
+        let YY = p2.Y.square()
+        let B = (p2.X + p2.Y).square()
+        let C = XX + YY
+        let D = XX - YY
+        let H = p2.Z.square()
+        let J = C - (H + H)
+        return GroupElement(rep: .p1p1, X: B - C, Y: C, Z: D, T: J)
     }
 
     // MARK: - Scalar multiplication

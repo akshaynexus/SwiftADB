@@ -251,48 +251,29 @@ public final class ADBPairingConnection {
     }
 
     private func exportKeyingMaterial(conn: NWConnection) async throws -> [UInt8] {
-        // NWConnection on Apple platforms exposes TLS metadata through
-        // `NWConnection.metadata(definition:)` → NWProtocolTLS.Metadata
-        // which provides a `securityProtocolMetadata` object.
-        //
-        // sec_protocol_metadata_access_peer_certificate_chain is the only stable API.
-        // exportKeyingMaterial is NOT directly available in the Network framework.
-        //
-        // We use a workaround: derive the keying material via HKDF from the
-        // TLS session's master secret as exposed by the negotiated cipher suite info.
-        //
-        // However, since ADB itself runs the PAKE over the TLS channel and the
-        // keying-material-export is a security-hardening measure (not a key-only channel),
-        // we implement the export using the Security framework's
-        // SSLCopyExportedKeyingMaterial if available, falling back to zeros for
-        // compatibility when running in environments without access to the raw SSLContext.
-        //
-        // IMPORTANT: Without a genuine export, the SPAKE2 is still secure but the
-        // channel-binding property is lost. A future implementation can obtain the
-        // underlying SSLContext via private SPI if needed.
-        //
-        // For now, use the approach that libadb-android uses on non-Conscrypt platforms:
-        // export from the NWProtocolTLS metadata using the SecProtocol API.
-
-        let metadata = conn.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata
-
-        guard metadata != nil else {
-            // Fallback: no keying material — still works, just without channel-binding
+        guard let secMetadata = (conn.metadata(definition: NWProtocolTLS.definition) as? NWProtocolTLS.Metadata)?.securityProtocolMetadata else {
             return [UInt8](repeating: 0, count: Self.exportKeySize)
         }
 
-        // sec_protocol_metadata_copy_negotiated_protocol is the closest public API.
-        // The actual EKM export is done via `sec_protocol_metadata_access_peer_certificate_chain`
-        // or private SPI. For now return a HKDF-derived value from the negotiated protocol name,
-        // which is a reasonable placeholder until Apple exposes the EKM API.
-        //
-        // NOTE: A future version should use either:
-        //  a) The private `__sec_protocol_metadata_get_session_exporter` SPI, or
-        //  b) Route the connection through a CFNetwork CFHTTPMessage with SSLContext
-        //     so that SSLCopyExportedKeyingMaterial (deprecated but functional) can be called.
-        //
-        // For the purposes of this implementation, we return zeroes (safe but no channel-binding).
-        return [UInt8](repeating: 0, count: Self.exportKeySize)
+        let label = Self.exportedKeyLabel
+        let labelBytes = [UInt8](label.utf8)
+
+        guard let data = labelBytes.withUnsafeBytes({ ptr in
+            sec_protocol_metadata_create_secret(
+                secMetadata,
+                labelBytes.count,
+                ptr.baseAddress!.assumingMemoryBound(to: CChar.self),
+                Self.exportKeySize
+            )
+        }) else {
+            return [UInt8](repeating: 0, count: Self.exportKeySize)
+        }
+
+        let dd = data as DispatchData
+        let count = dd.count
+        return dd.withUnsafeBytes { (ptr: UnsafePointer<UInt8>) -> [UInt8] in
+            Array(UnsafeBufferPointer(start: ptr, count: count))
+        }
     }
 
     // MARK: - Packet I/O

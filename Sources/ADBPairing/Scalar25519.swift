@@ -144,6 +144,7 @@ struct Scalar25519 {
         carry[8] = s8 >> 21; s9  += carry[8]; s8  -= carry[8] << 21
         carry[9] = s9 >> 21; s10 += carry[9]; s9  -= carry[9] << 21
         carry[10] = s10 >> 21; s11 += carry[10]; s10 -= carry[10] << 21
+        carry[11] = s11 >> 21; s12 += carry[11]; s11 -= carry[11] << 21
 
         s0 += s12 * 666643; s1 += s12 * 470296; s2 += s12 * 654183
         s3 -= s12 * 997805; s4 += s12 * 136657; s5 -= s12 * 683901; s12 = 0
