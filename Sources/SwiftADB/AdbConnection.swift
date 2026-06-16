@@ -369,33 +369,10 @@ public actor AdbConnection {
     
     private func getSecIdentity() -> sec_identity_t? {
         guard let certificate = keyPair.certificate else { return nil }
-        var identityRef: SecIdentity?
-        let status = SecIdentityCreateWithCertificate(nil, certificate, &identityRef)
-        if status == errSecSuccess, let identity = identityRef {
-            return sec_identity_create(identity)
+        guard let identity = SecIdentityCreate(nil, certificate, keyPair.privateKey) else {
+            return nil
         }
-        
-        let addKeyQuery: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecValueRef as String: keyPair.privateKey,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
-        _ = SecItemAdd(addKeyQuery as CFDictionary, nil)
-        
-        let addCertQuery: [String: Any] = [
-            kSecClass as String: kSecClassCertificate,
-            kSecValueRef as String: certificate,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        ]
-        _ = SecItemAdd(addCertQuery as CFDictionary, nil)
-        
-        var identityRef2: SecIdentity?
-        let status2 = SecIdentityCreateWithCertificate(nil, certificate, &identityRef2)
-        if status2 == errSecSuccess, let identity = identityRef2 {
-            return sec_identity_create(identity)
-        }
-        
-        return nil
+        return sec_identity_create(identity)
     }
 }
 

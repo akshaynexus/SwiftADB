@@ -14,15 +14,12 @@ extension KeyPair: ADBKeyPair {
                           userInfo: [NSLocalizedDescriptionKey:
                             "KeyPair has no certificate — generate one with KeyPair.generateWithCertificate()"])
         }
-        var identity: SecIdentity?
-        let status = SecIdentityCreateWithCertificate(nil, cert, &identity)
-        guard status == errSecSuccess, let id = identity else {
-            // Try to wrap manually
+        guard let identity = SecIdentityCreate(nil, cert, privateKey) else {
             throw NSError(domain: "KeyPair", code: 11,
                           userInfo: [NSLocalizedDescriptionKey:
-                            "Could not create SecIdentity (status \(status))"])
+                            "Could not create SecIdentity"])
         }
-        return sec_identity_create(id)!
+        return sec_identity_create(identity)!
     }
 
     // MARK: - encodedPublicKey
