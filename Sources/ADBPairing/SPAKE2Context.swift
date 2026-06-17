@@ -481,7 +481,9 @@ public final class SPAKE2Context {
     /// Multiply scalar `a` by the precomp table (4-bit windowed double-and-add, 64 iterations).
     /// Matches Java Spake2Context.geScalarMultiplySmallPrecomp.
     private func geScalarMultiplySmallPrecomp(scalar a: [UInt8], table: [GroupElement]) -> GroupElement {
-        let zero = GroupElement(precomp: .zero, ymx: .zero, xy2d: .zero)
+        // PRECOMP identity for point (x=0, y=1): (y+x, y-x, 2dxy) = (1, 1, 0).
+        // Must match Java Curve.zeroPrecomp = precomp(one, one, zero).
+        let zero = GroupElement(precomp: .one, ymx: .one, xy2d: .zero)
         var h = GroupElement.zero
         for i in stride(from: 63, through: 0, by: -1) {
             var index = 0

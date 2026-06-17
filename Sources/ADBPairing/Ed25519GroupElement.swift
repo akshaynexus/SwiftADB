@@ -151,15 +151,19 @@ struct GroupElement {
     // MARK: - Doubling (P2 → P1P1)
 
     func dbl() -> GroupElement {
+        // Matches spake2-java GroupElement.dbl() (ref10 ge_p2_dbl):
+        //   XX = X², YY = Y², B = 2Z², AA = (X+Y)²
+        //   Yn = YY + XX, Zn = YY - XX
+        //   → p1p1(AA - Yn, Yn, Zn, B - Zn)
         let p2 = toP2()
         let XX = p2.X.square()
         let YY = p2.Y.square()
-        let B = (p2.X + p2.Y).square()
-        let C = XX + YY
-        let D = XX - YY
-        let H = p2.Z.square()
-        let J = C - (H + H)
-        return GroupElement(rep: .p1p1, X: B - C, Y: C, Z: D, T: J)
+        let Z2 = p2.Z.square()
+        let B  = Z2 + Z2                 // 2·Z²
+        let AA = (p2.X + p2.Y).square()
+        let Yn = YY + XX
+        let Zn = YY - XX
+        return GroupElement(rep: .p1p1, X: AA - Yn, Y: Yn, Z: Zn, T: B - Zn)
     }
 
     // MARK: - Scalar multiplication
