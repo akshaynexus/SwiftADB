@@ -332,7 +332,12 @@ public actor AdbConnection {
                 case .ready:
                     continuation.resume()
                 case .failed(let error):
-                    continuation.resume(throwing: error)
+                    // A failure of the post-STLS TLS 1.3 handshake means the device
+                    // rejected our client certificate — on Android 11+ this is the
+                    // signal that the device must be paired first. Surface a clear
+                    // pairing-required error instead of a raw TLS status.
+                    // (Ports libadb-android commit d88ca78.)
+                    continuation.resume(throwing: AdbConnection.mapTlsHandshakeError(error))
                 case .cancelled:
                     continuation.resume(throwing: ADBError.connectionClosed)
                 default:
@@ -341,9 +346,20 @@ public actor AdbConnection {
             }
             conn.start(queue: .global())
         }
-        
+
         conn.stateUpdateHandler = nil
         startReadLoop()
+    }
+
+    /// Maps a TLS-layer handshake failure to `ADBError.pairingRequired`.
+    /// A TLS error during the STLS upgrade indicates the peer rejected the
+    /// connection because pairing has not been performed; other errors pass
+    /// through unchanged. Mirrors libadb-android's SSLProtocolException check.
+    nonisolated static func mapTlsHandshakeError(_ error: Error) -> Error {
+        if let nwError = error as? NWError, case .tls(let status) = nwError {
+            return ADBError.pairingRequired("TLS handshake failed (status \(status)); the device likely requires pairing.")
+        }
+        return error
     }
     
     private func cleanup(error: Error) {

@@ -36,6 +36,51 @@ Or in Xcode:
 
 ---
 
+## iOS App Integration (Info.plist & Entitlements)
+
+ADB connects to a device over the **local network** (e.g. `192.168.x.x` on port `5555`), and on Apple platforms that requires explicit permission. **This is the #1 reason connections fail on iOS** — the socket is silently blocked by the OS until the user grants Local Network access, usually surfacing as a connection timeout even though the device is reachable.
+
+### Required: Local Network permission (iOS 14+ / tvOS 14+)
+
+Add a usage-description string to your app's **Info.plist**. iOS shows this text in the *"… would like to find and connect to devices on your local network"* prompt the first time you connect:
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>SwiftADB connects to your Android device over the local network to run ADB commands.</string>
+```
+
+Without this key, the first `connect()` fails (typically as a timeout or "No route to host") regardless of whether the device is online.
+
+> **Timing tip:** The Local Network prompt is presented asynchronously on the *first* connection attempt. If the user hasn't responded yet, that first attempt can fail — either trigger a throwaway connection early so the prompt appears before it matters, or retry `connect()` once permission has been granted. Generous `connect(timeout:)` values help here too.
+
+### Optional: Bonjour discovery (only if you auto-discover devices)
+
+If you discover devices or pairing endpoints via mDNS/Bonjour (instead of typing an IP), also declare the ADB service types so the OS allows browsing for them:
+
+```xml
+<key>NSBonjourServices</key>
+<array>
+    <string>_adb-tls-connect._tcp</string>
+    <string>_adb-tls-pairing._tcp</string>
+    <string>_adb._tcp</string>
+</array>
+```
+
+### macOS: App Sandbox entitlement
+
+If your macOS app is sandboxed, enable outgoing network connections in your `.entitlements` file:
+
+```xml
+<key>com.apple.security.network.client</key>
+<true/>
+```
+
+### Cleartext / App Transport Security — *not* required
+
+You do **not** need to disable App Transport Security or add `NSAllowsArbitraryLoads` for SwiftADB, including for the unencrypted port-5555 connection. ATS only governs the URL Loading System (`URLSession`, HTTP/HTTPS). SwiftADB talks to the device over **raw TCP via `Network.framework` (`NWConnection`)**, which ATS does not intercept — so plaintext ADB works without any ATS exceptions. (ATS settings only matter if some *other* part of your app makes plain-HTTP requests, which is unrelated to ADB.)
+
+---
+
 ## Getting Started
 
 ### 1. Generate or Load an RSA KeyPair
@@ -56,6 +101,8 @@ If you have a pre-existing key (e.g. `~/.android/adbkey`), you can instantiate a
 ## Connection & Pairing Flow
 
 SwiftADB supports both the traditional **unencrypted TCP connection (Port 5555)** and **modern secure TLS connections (STLS)**.
+
+> **On iOS, configure Local Network permission first.** If your `connect()` calls time out on a reachable device, you are almost certainly missing `NSLocalNetworkUsageDescription` — see [iOS App Integration](#ios-app-integration-infoplist--entitlements).
 
 ### Traditional Connection & On-Device Pairing (Port 5555)
 

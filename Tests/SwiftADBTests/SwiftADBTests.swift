@@ -1,9 +1,27 @@
 import Testing
 import Foundation
+import Network
 @testable import SwiftADB
 
 @Suite("SwiftADB Tests")
 struct SwiftADBTests {
+
+    @Test("TLS handshake failure maps to pairingRequired (ported from libadb d88ca78)")
+    func testTlsHandshakeMapsToPairingRequired() {
+        // A TLS-layer failure during STLS upgrade means the device requires pairing.
+        let tlsError = NWError.tls(OSStatus(-9800)) // errSSLProtocol
+        let mapped = AdbConnection.mapTlsHandshakeError(tlsError)
+        if case ADBError.pairingRequired = mapped {
+            // expected
+        } else {
+            Issue.record("TLS error should map to ADBError.pairingRequired, got \(mapped)")
+        }
+
+        // Non-TLS errors must pass through unchanged.
+        let posix = NWError.posix(.ECONNREFUSED)
+        let passthrough = AdbConnection.mapTlsHandshakeError(posix)
+        #expect(passthrough is NWError, "Non-TLS errors must not be remapped")
+    }
 
     @Test("KeyPair Generation and Signature")
     func testKeyPairAndSignature() throws {
